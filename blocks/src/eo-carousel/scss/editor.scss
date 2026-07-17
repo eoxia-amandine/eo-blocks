@@ -1,11 +1,17 @@
 /**
  * The following styles get applied inside the editor only.
  *
- * Replace them with your own styles or remove the file completely.
+ * They make the editor canvas resemble the real, front-end Swiper carousel
+ * (same nav arrow / pagination bullet markup and classes as the front, driven
+ * by the very same --swiper-theme-color variable) while keeping every slide
+ * reachable and editable at all times.
  */
 
 .wp-block-eo-blocks-carousel.eo-carousel-editor {
-	.eo-carousel-editor__viewport {
+	--eo-carousel-spv: 1;
+	--eo-carousel-gap: 0;
+
+	.eo-carousel-editor__stage {
 		position: relative;
 		border: 1px solid #e0e0e0;
 		border-radius: 4px;
@@ -13,20 +19,38 @@
 		padding: 16px 48px;
 	}
 
+	.eo-carousel-editor__viewport {
+		overflow-x: auto;
+		overflow-y: hidden;
+		scroll-snap-type: x proximity;
+		scrollbar-width: none;
+
+		&::-webkit-scrollbar {
+			display: none;
+		}
+	}
+
 	.eo-carousel-editor__track {
+		display: flex;
+		align-items: stretch;
+		gap: var(--eo-carousel-gap);
+
 		.block-list-appender {
 			position: static;
 		}
+	}
 
-		.block-editor-block-list__layout {
-			display: block;
-		}
+	// Scoped by block type (not by DOM depth), so this can never reach into the
+	// content blocks placed *inside* a slide.
+	[data-type="eo-blocks/slide"] {
+		flex: 0 0 calc((100% - (var(--eo-carousel-spv) - 1) * var(--eo-carousel-gap)) / var(--eo-carousel-spv));
+		max-width: 100%;
+		scroll-snap-align: start;
+		transition: transform 0.3s ease, filter 0.3s ease;
+	}
 
-		// Scoped to the slide wrapper itself (by block type, not by DOM depth) so this
-		// never affects the layout of blocks placed *inside* a slide.
-		[data-type="eo-blocks/slide"] {
-			width: 100%;
-		}
+	&.eo-carousel-editor--effect-fade [data-type="eo-blocks/slide"] {
+		flex-basis: 100%;
 	}
 
 	.eo-carousel-editor__empty {
@@ -40,35 +64,59 @@
 		color: #757575;
 	}
 
-	.eo-carousel-editor__nav {
-		position: absolute;
-		top: 50%;
-		transform: translateY(-50%);
-		z-index: 1;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 32px;
-		height: 32px;
-		padding: 0;
-		border-radius: 50%;
+	// Real Swiper markup/classes for nav arrows and pagination dots: same look as
+	// the front end for free, already themed through --swiper-theme-color.
+	.swiper-button-prev,
+	.swiper-button-next {
 		background: #fff;
+		border-radius: 50%;
 		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 
-		&:hover {
-			background: var(--eo-carousel-editor-color, #007aff);
-			color: #fff;
-		}
-
-		&--prev {
-			left: 8px;
-		}
-
-		&--next {
-			right: 8px;
+		&::after {
+			font-size: 16px;
 		}
 	}
 
+	.swiper-pagination {
+		position: static;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		margin-top: 8px;
+	}
+
+	.eo-carousel-editor__thumbs {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		margin-top: 12px;
+	}
+
+	.eo-carousel-editor__thumb {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 32px;
+		height: 32px;
+		padding: 0 6px;
+		border: 1px solid #949494;
+		border-radius: 4px;
+		background: #fff;
+		font-size: 12px;
+		cursor: pointer;
+		opacity: 0.6;
+
+		&.is-active {
+			opacity: 1;
+			border-color: var(--swiper-theme-color, #007aff);
+			color: var(--swiper-theme-color, #007aff);
+		}
+	}
+
+	// Compact, always-available editing toolbar: independent from the
+	// navigation/pagination toggles above, so every slide stays reachable even
+	// when the front-end nav is turned off.
 	.eo-carousel-editor__toolbar {
 		display: flex;
 		flex-wrap: wrap;
@@ -100,8 +148,8 @@
 		cursor: pointer;
 
 		&.is-active {
-			border-color: var(--eo-carousel-editor-color, #007aff);
-			background: var(--eo-carousel-editor-color, #007aff);
+			border-color: #1e1e1e;
+			background: #1e1e1e;
 		}
 
 		&--add {
@@ -109,8 +157,8 @@
 			color: #757575;
 
 			&:hover {
-				border-color: var(--eo-carousel-editor-color, #007aff);
-				color: var(--eo-carousel-editor-color, #007aff);
+				border-color: #1e1e1e;
+				color: #1e1e1e;
 			}
 		}
 	}

@@ -19,7 +19,7 @@ import { __experimentalNumberControl as NumberControl,
 } from '@wordpress/components';
 import { useSelect, useDispatch } from '@wordpress/data';
 import { useState, useEffect, useRef, useMemo } from '@wordpress/element';
-import { Icon, plus, chevronLeft, chevronRight, arrowLeft, arrowRight, copy, trash } from '@wordpress/icons';
+import { Icon, plus, arrowLeft, arrowRight, copy, trash } from '@wordpress/icons';
 
 
 /**
@@ -29,6 +29,13 @@ import { Icon, plus, chevronLeft, chevronRight, arrowLeft, arrowRight, copy, tra
  * @see https://www.npmjs.com/package/@wordpress/scripts#using-css
  */
 import './scss/editor.scss';
+
+// Effects that get a "stacked" single-slide crossfade, exactly like Swiper does on the front.
+const FADE_EFFECTS = [ 'fade' ];
+// Effects that keep the multi-slide layout but hint at a 3D transform on the slides
+// that are not currently active. This is a simplified, CSS-only approximation of
+// Swiper's coverflow/flip/cube/cards engines, not a pixel-perfect reproduction.
+const DEPTH_EFFECTS = [ 'coverflow', 'flip', 'cube', 'cards' ];
 
 /**
  * The edit function describes the structure of your block in the context of the
@@ -53,6 +60,7 @@ export default function Edit( { attributes, setAttributes, clientId } ) {
 	);
 
 	const { selectBlock, insertBlock, removeBlock, moveBlocksUp, moveBlocksDown } = useDispatch( blockEditorStore );
+	const viewportRef = useRef( null );
 
 	// If the current editor selection is a slide (or something inside a slide),
 	// that slide becomes the active one, just like clicking through a real carousel.
@@ -87,6 +95,26 @@ export default function Edit( { attributes, setAttributes, clientId } ) {
 	}, [ slides, activeSlideId ] );
 
 	const activeSlide = slides[ activeIndex ];
+	const isFade = FADE_EFFECTS.includes( attributes.effect );
+	const isDepthEffect = DEPTH_EFFECTS.includes( attributes.effect );
+	let effectModifier = 'default';
+	if ( isFade ) {
+		effectModifier = 'fade';
+	} else if ( isDepthEffect ) {
+		effectModifier = 'depth';
+	}
+
+	// Keep the active slide scrolled into view (multi-slide "default"/depth layouts only;
+	// fade is a stack, there is nothing to scroll).
+	useEffect( () => {
+		if ( isFade || ! activeSlide || ! viewportRef.current ) {
+			return;
+		}
+		const slideEl = viewportRef.current.querySelector( `[data-block="${ activeSlide.clientId }"]` );
+		if ( slideEl ) {
+			slideEl.scrollIntoView( { behavior: 'smooth', inline: 'start', block: 'nearest' } );
+		}
+	}, [ activeSlide, isFade ] );
 
 	const goToSlide = ( index ) => {
 		const target = slides[ index ];
@@ -143,6 +171,42 @@ export default function Edit( { attributes, setAttributes, clientId } ) {
 		}
 		moveBlocksDown( [ activeSlide.clientId ], clientId );
 	};
+
+	// Everything below only ever targets [data-type="eo-blocks/slide"], never a
+	// depth-based ancestor selector, so blocks placed *inside* a slide (which carry a
+	// different data-type) are never accidentally affected by this stylesheet.
+	const scopeSelector = `[data-block="${ clientId }"] .eo-carousel-editor__track`;
+	const blockSelector = `[data-block="${ clientId }"]`;
+	const styleRules = [];
+
+	// Custom properties live in this stylesheet (not as inline styles) on purpose:
+	// inline styles always beat an @media rule's specificity, which would make the
+	// mobile override below never actually apply.
+	styleRules.push( `
+		${ blockSelector } {
+			--swiper-theme-color: ${ attributes.mainColor };
+			--eo-carousel-spv: ${ attributes.slidesPerView || 1 };
+			--eo-carousel-gap: ${ attributes.spaceBetween || 0 }px;
+		}
+	` );
+
+	if ( isFade && activeSlide ) {
+		styleRules.push(
+			`${ scopeSelector } [data-type="eo-blocks/slide"]:not([data-block="${ activeSlide.clientId }"]) { display: none; }`
+		);
+	} else if ( isDepthEffect && activeSlide ) {
+		styleRules.push(
+			`${ scopeSelector } [data-type="eo-blocks/slide"]:not([data-block="${ activeSlide.clientId }"]) { transform: scale(0.92); filter: saturate(0.75) brightness(0.95); }`
+		);
+	}
+
+	if ( attributes.mobileBreakpoint ) {
+		styleRules.push( `
+			@media (max-width: ${ attributes.mobileBreakpoint }px) {
+				${ blockSelector } { --eo-carousel-spv: ${ attributes.mobileSlidesPerView || 1 }; }
+			}
+		` );
+	}
 
 	return (
 		<>
@@ -293,25 +357,21 @@ export default function Edit( { attributes, setAttributes, clientId } ) {
 				</PanelBody>
 			</InspectorControls>
 
-			<div {...useBlockProps({ className: 'eo-carousel-editor' })}>
-				{ activeSlide && (
-					<style>
-						{ /*
-						 * Only elements carrying data-type="eo-blocks/slide" are targeted, never a
-						 * depth-based selector, so blocks inserted *inside* the active slide (which
-						 * carry their own, different data-type) are never accidentally hidden.
-						 */ `
-						[data-block="${ clientId }"] .eo-carousel-editor__track [data-type="eo-blocks/slide"]:not([data-block="${ activeSlide.clientId }"]) { display: none; }
-						` }
-					</style>
-				) }
+			<div
+				{...useBlockProps({
+					className: `eo-carousel-editor eo-carousel-editor--effect-${ effectModifier }`,
+				})}
+			>
+				<style>{ styleRules.join( '\n' ) }</style>
 
-				<div className="eo-carousel-editor__viewport" style={{ '--eo-carousel-editor-color': attributes.mainColor }}>
-					<div className="eo-carousel-editor__track">
-						<InnerBlocks
-							allowedBlocks={['eo-blocks/slide']}
-							renderAppender={false}
-						/>
+				<div className="eo-carousel-editor__stage">
+					<div className="eo-carousel-editor__viewport" ref={ viewportRef }>
+						<div className="eo-carousel-editor__track">
+							<InnerBlocks
+								allowedBlocks={['eo-blocks/slide']}
+								renderAppender={false}
+							/>
+						</div>
 					</div>
 
 					{ slides.length === 0 && (
@@ -324,23 +384,57 @@ export default function Edit( { attributes, setAttributes, clientId } ) {
 						</div>
 					) }
 
-					{ slides.length > 1 && (
+					{ attributes.navigation && slides.length > 1 && (
 						<>
-							<Button
-								className="eo-carousel-editor__nav eo-carousel-editor__nav--prev"
-								icon={ chevronLeft }
-								label={ __( 'Previous slide', 'eo-blocks' ) }
+							<button
+								type="button"
+								className="swiper-button-prev"
+								aria-label={ __( 'Previous slide', 'eo-blocks' ) }
 								onClick={ goPrev }
 							/>
-							<Button
-								className="eo-carousel-editor__nav eo-carousel-editor__nav--next"
-								icon={ chevronRight }
-								label={ __( 'Next slide', 'eo-blocks' ) }
+							<button
+								type="button"
+								className="swiper-button-next"
+								aria-label={ __( 'Next slide', 'eo-blocks' ) }
 								onClick={ goNext }
 							/>
 						</>
 					) }
+
+					{ attributes.pagination && slides.length > 0 && (
+						<div className="swiper-pagination swiper-pagination-bullets">
+							{ slides.map( ( slide, index ) => (
+								<span
+									key={ slide.clientId }
+									role="button"
+									tabIndex={ 0 }
+									className={ 'swiper-pagination-bullet' + ( index === activeIndex ? ' swiper-pagination-bullet-active' : '' ) }
+									onClick={ () => goToSlide( index ) }
+									onKeyDown={ ( event ) => ( event.key === 'Enter' || event.key === ' ' ) && goToSlide( index ) }
+									aria-label={
+										/* translators: %d: slide number. */
+										sprintf( __( 'Go to slide %d', 'eo-blocks' ), index + 1 )
+									}
+								/>
+							) ) }
+						</div>
+					) }
 				</div>
+
+				{ attributes.thumbs && slides.length > 0 && (
+					<div className="eo-carousel-editor__thumbs">
+						{ slides.map( ( slide, index ) => (
+							<button
+								key={ slide.clientId }
+								type="button"
+								className={ 'eo-carousel-editor__thumb' + ( index === activeIndex ? ' is-active' : '' ) }
+								onClick={ () => goToSlide( index ) }
+							>
+								{ index + 1 }
+							</button>
+						) ) }
+					</div>
+				) }
 
 				{ slides.length > 0 && (
 					<div className="eo-carousel-editor__toolbar">
